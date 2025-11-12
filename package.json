@@ -8,14 +8,14 @@
   ],
   "homepage": "https://github.com/Lord-Samuel/Bail-Store",
   "repository": {
-    "url": "git@github.com:rodrigogs/baileys-store.git"
+    "url": "git@github.com:Lord-Samuel/Bail-Store.git"
   },
   "license": "MIT",
   "author": "Lord-Samuel",
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
   "files": [
-    "lib/*"
+    "src/*"
   ],
   "scripts": {
     "build:all": "tsc && typedoc",
