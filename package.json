@@ -12,7 +12,7 @@
   },
   "license": "MIT",
   "author": "Lord-Samuel",
-  "main": "src/index.js",
+  "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [
     "lib/*"
