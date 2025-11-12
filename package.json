@@ -1,6 +1,6 @@
 {
   "name": "bail-store",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Store management for Baileys WhatsApp library",
   "keywords": [
     "whatsapp",
