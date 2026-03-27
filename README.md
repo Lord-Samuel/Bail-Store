@@ -23,7 +23,7 @@ This package provides different storage implementations for Baileys:
 ## In-Memory Store
 
 ```js
-import { makeInMemoryStore } from '@rodrigogs/baileys-store'
+import { makeInMemoryStore } from 'bail-store'
 
 const store = makeInMemoryStore({})
 // You can bind the store to your Baileys instance
@@ -33,7 +33,7 @@ store.bind(baileysSock)
 ## Cache Manager Auth State
 
 ```js
-import { makeCacheManagerAuthState } from '@rodrigogs/baileys-store'
+import { makeCacheManagerAuthState } from 'bail-store'
 import { caching } from 'cache-manager'
 
 // Create a store with cache-manager
