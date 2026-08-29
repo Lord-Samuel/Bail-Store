@@ -1,6 +1,6 @@
 {
   "name": "bail-store",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Store management for Baileys WhatsApp library",
   "keywords": [
     "whatsapp",
@@ -13,33 +13,12 @@
   },
   "license": "MIT",
   "author": "Lord-Samuel",
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
-  "files": [
-    "lib/*",
-    "src/*",
-    "README.md",
-    "package.json"
-  ],
+  "main": "index.js",
   "scripts": {
-    "prepare": "npm run build:tsc",
-    "build:all": "tsc && typedoc",
-    "build:docs": "typedoc",
-    "build:tsc": "tsc"
+    "start": "node ."
   },
   "dependencies": {
-    "@adiwajshing/keyed-db": "0.2.4",
-    "cache-manager": "7.2.4"
-  },
-  "devDependencies": {
-    "@types/node": "^20.17.9",
-    "@whiskeysockets/eslint-config": "github:whiskeysockets/eslint-config",
-    "baileys": "github:Whiskeysockets/baileys",
-    "conventional-changelog-cli": "^5.0.0",
-    "release-it": "^19.0.6",
-    "typedoc": "^0.28.14",
-    "typedoc-plugin-markdown": "4.9.0",
-    "typescript": "^5.9.3"
+    "@adiwajshing/keyed-db": "0.2.4"
   },
   "peerDependencies": {
     "baileys": "npm:bail-lite"
@@ -49,7 +28,6 @@
       "optional": false
     }
   },
-  "packageManager": "yarn@1.22.22",
   "engines": {
     "node": ">=20.0.0"
   }
