@@ -15,10 +15,7 @@ Note: This package requires `baileys` as a peer dependency. Make sure to install
 
 # Usage
 
-This package provides different storage implementations for Baileys:
-
-1. In-Memory Store
-2. Cache Manager Auth State
+This package implementation of `In-Memory Store` since it was removed from baileys.
 
 ## In-Memory Store
 
