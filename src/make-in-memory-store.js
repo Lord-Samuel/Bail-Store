@@ -1,8 +1,8 @@
 const { DEFAULT_CONNECTION_CONFIG, jidDecode, jidNormalizedUser, proto } = require('baileys');
 const { LabelAssociationType } = require('baileys/lib/Types/LabelAssociation');
 const { md5, toNumber, updateMessageWithReaction, updateMessageWithReceipt } = require('baileys/lib/Utils');
-const makeOrderedDictionary = require('./make-ordered-dictionary');
-const { ObjectRepository } = require('./object-repository');
+const makeOrderedDictionary = require('./Store/make-ordered-dictionary');
+const { ObjectRepository } = require('./Store/object-repository');
 
 const waChatKey = (pin) => ({
     key: (c) => (pin ? (c.pinned ? '1' : '0') : '') + (c.archived ? '0' : '1') + (c.conversationTimestamp ? c.conversationTimestamp.toString(16).padStart(8, '0') : '') + c.id,
