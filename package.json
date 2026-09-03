@@ -21,7 +21,7 @@
     "@adiwajshing/keyed-db": "0.2.4"
   },
   "peerDependencies": {
-    "baileys": "npm:bail-lite"
+    "baileys": "github:Lord-Samuel/Bail-lite"
   },
   "peerDependenciesMeta": {
     "baileys": {
