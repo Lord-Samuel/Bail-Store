@@ -23,8 +23,8 @@ module.exports = (config) => {
     const chatKey = config.chatKey || waChatKey(true);
     const labelAssociationKey = config.labelAssociationKey || waLabelAssociationKey;
     const logger = config.logger || DEFAULT_CONNECTION_CONFIG.logger.child({ stream: 'in-mem-store' });
-    const KeyedDB = require('@adiwajshing/keyed-db').default;
-
+    const KeyedDB = require('./keyed-db/KeyedDB');
+    
     const chats = new KeyedDB(chatKey, (c) => c.id);
     const messages = {};
     const contacts = {};
