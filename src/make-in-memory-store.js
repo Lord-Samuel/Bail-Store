@@ -1,8 +1,7 @@
-const { DEFAULT_CONNECTION_CONFIG, jidDecode, jidNormalizedUser, proto } = require('baileys');
-const { LabelAssociationType } = require('baileys/lib/Types/LabelAssociation');
-const { md5, toNumber, updateMessageWithReaction, updateMessageWithReceipt } = require('baileys/lib/Utils');
 const makeOrderedDictionary = require('./Store/make-ordered-dictionary');
 const { ObjectRepository } = require('./Store/object-repository');
+const KeyedDB = require('./keyed-db/KeyedDB');
+const { LabelAssociationType, md5, toNumber, jidDecode, jidNormalizedUser, updateMessageWithReaction, updateMessageWithReceipt, noopLogger, HISTORY_SYNC_ON_DEMAND } = require('./func.js');
 
 const waChatKey = (pin) => ({
     key: (c) => (pin ? (c.pinned ? '1' : '0') : '') + (c.archived ? '0' : '1') + (c.conversationTimestamp ? c.conversationTimestamp.toString(16).padStart(8, '0') : '') + c.id,
@@ -10,21 +9,19 @@ const waChatKey = (pin) => ({
 });
 
 const waMessageID = (m) => m.key.id || '';
+const makeMessagesDictionary = () => makeOrderedDictionary(waMessageID);
 
 const waLabelAssociationKey = {
     key: (la) => (la.type === LabelAssociationType.Chat ? la.chatId + la.labelId : la.chatId + la.messageId + la.labelId),
     compare: (k1, k2) => k2.localeCompare(k1)
 };
 
-const makeMessagesDictionary = () => makeOrderedDictionary(waMessageID);
-
 module.exports = (config) => {
     const socket = config.socket;
     const chatKey = config.chatKey || waChatKey(true);
     const labelAssociationKey = config.labelAssociationKey || waLabelAssociationKey;
-    const logger = config.logger || DEFAULT_CONNECTION_CONFIG.logger.child({ stream: 'in-mem-store' });
-    const KeyedDB = require('./keyed-db/KeyedDB');
-    
+    const logger = config.logger || noopLogger;
+
     const chats = new KeyedDB(chatKey, (c) => c.id);
     const messages = {};
     const contacts = {};
@@ -35,9 +32,7 @@ module.exports = (config) => {
     const labelAssociations = new KeyedDB(labelAssociationKey, labelAssociationKey.key);
 
     const assertMessageList = (jid) => {
-        if (!messages[jid]) {
-            messages[jid] = makeMessagesDictionary();
-        }
+        if (!messages[jid]) messages[jid] = makeMessagesDictionary();
         return messages[jid];
     };
 
@@ -45,67 +40,36 @@ module.exports = (config) => {
         const oldContacts = new Set(Object.keys(contacts));
         for (const contact of newContacts) {
             oldContacts.delete(contact.id);
-            contacts[contact.id] = Object.assign(
-                contacts[contact.id] || {},
-                contact
-            );
+            contacts[contact.id] = Object.assign(contacts[contact.id] || {}, contact);
         }
         return oldContacts;
     };
 
     const labelsUpsert = (newLabels) => {
-        for (const label of newLabels) {
-            labels.upsertById(label.id, label);
-        }
+        for (const label of newLabels) labels.upsertById(label.id, label);
     };
 
     const bind = (ev) => {
-        ev.on('connection.update', update => {
-            Object.assign(state, update);
-        });
+        ev.on('connection.update', update => Object.assign(state, update));
 
-        ev.on('messaging-history.set', ({
-            chats: newChats,
-            contacts: newContacts,
-            messages: newMessages,
-            isLatest,
-            syncType
-        }) => {
-            if (syncType === proto.HistorySync.HistorySyncType.ON_DEMAND) {
-                return;
-            }
-
+        ev.on('messaging-history.set', ({ chats: newChats, contacts: newContacts, messages: newMessages, isLatest, syncType }) => {
+            if (syncType === HISTORY_SYNC_ON_DEMAND) return;
             if (isLatest) {
                 chats.clear();
-                for (const id in messages) {
-                    delete messages[id];
-                }
+                for (const id in messages) delete messages[id];
             }
-
             const chatsAdded = chats.insertIfAbsent(...newChats).length;
             logger.debug({ chatsAdded }, 'synced chats');
-
             const oldContacts = contactsUpsert(newContacts);
-            if (isLatest) {
-                for (const jid of oldContacts) {
-                    delete contacts[jid];
-                }
-            }
-
+            if (isLatest) for (const jid of oldContacts) delete contacts[jid];
             logger.debug({ deletedContacts: isLatest ? oldContacts.size : 0, newContacts }, 'synced contacts');
-
             for (const msg of newMessages) {
-                const jid = msg.key.remoteJid;
-                const list = assertMessageList(jid);
-                list.upsert(msg, 'prepend');
+                assertMessageList(msg.key.remoteJid).upsert(msg, 'prepend');
             }
-
             logger.debug({ messages: newMessages.length }, 'synced messages');
         });
 
-        ev.on('contacts.upsert', contacts => {
-            contactsUpsert(contacts);
-        });
+        ev.on('contacts.upsert', contacts => contactsUpsert(contacts));
 
         ev.on('contacts.update', async updates => {
             for (const update of updates) {
@@ -119,7 +83,6 @@ module.exports = (config) => {
                     }));
                     contact = contacts[contactHashes.find(([, b]) => b === update.id)?.[0] || ''];
                 }
-
                 if (contact) {
                     if (update.imgUrl === 'changed') {
                         contact.imgUrl = socket ? await socket?.profilePictureUrl(contact.id) : undefined;
@@ -129,14 +92,11 @@ module.exports = (config) => {
                 } else {
                     return logger.debug({ update }, 'got update for non-existant contact');
                 }
-
                 Object.assign(contacts[contact.id], contact);
             }
         });
 
-        ev.on('chats.upsert', newChats => {
-            chats.upsert(...newChats);
-        });
+        ev.on('chats.upsert', newChats => chats.upsert(...newChats));
 
         ev.on('chats.update', updates => {
             for (let update of updates) {
@@ -147,34 +107,21 @@ module.exports = (config) => {
                     }
                     Object.assign(chat, update);
                 });
-                if (!result) {
-                    logger.debug({ update }, 'got update for non-existant chat');
-                }
+                if (!result) logger.debug({ update }, 'got update for non-existant chat');
             }
         });
 
         ev.on('labels.edit', (label) => {
-            if (label.deleted) {
-                return labels.deleteById(label.id);
-            }
-
-            if (labels.count() < 20) {
-                return labels.upsertById(label.id, label);
-            }
-
+            if (label.deleted) return labels.deleteById(label.id);
+            if (labels.count() < 20) return labels.upsertById(label.id, label);
             logger.error('Labels count exceed');
         });
 
         ev.on('labels.association', ({ type, association }) => {
             switch (type) {
-                case 'add':
-                    labelAssociations.upsert(association);
-                    break;
-                case 'remove':
-                    labelAssociations.delete(association);
-                    break;
-                default:
-                    console.error(`unknown operation type [${type}]`);
+                case 'add': labelAssociations.upsert(association); break;
+                case 'remove': labelAssociations.delete(association); break;
+                default: console.error(`unknown operation type [${type}]`);
             }
         });
 
@@ -184,33 +131,21 @@ module.exports = (config) => {
         });
 
         ev.on('chats.delete', deletions => {
-            for (const item of deletions) {
-                if (chats.get(item)) {
-                    chats.deleteById(item);
-                }
-            }
+            for (const item of deletions) if (chats.get(item)) chats.deleteById(item);
         });
 
         ev.on('messages.upsert', ({ messages: newMessages, type }) => {
-            switch (type) {
-                case 'append':
-                case 'notify':
-                    for (const msg of newMessages) {
-                        const jid = jidNormalizedUser(msg.key.remoteJid);
-                        const list = assertMessageList(jid);
-                        list.upsert(msg, 'append');
-
-                        if (type === 'notify' && !chats.get(jid)) {
-                            ev.emit('chats.upsert', [
-                                {
-                                    id: jid,
-                                    conversationTimestamp: toNumber(msg.messageTimestamp),
-                                    unreadCount: 1
-                                }
-                            ]);
-                        }
-                    }
-                    break;
+            if (type !== 'append' && type !== 'notify') return;
+            for (const msg of newMessages) {
+                const jid = jidNormalizedUser(msg.key.remoteJid);
+                assertMessageList(jid).upsert(msg, 'append');
+                if (type === 'notify' && !chats.get(jid)) {
+                    ev.emit('chats.upsert', [{
+                        id: jid,
+                        conversationTimestamp: toNumber(msg.messageTimestamp),
+                        unreadCount: 1
+                    }]);
+                }
             }
         });
 
@@ -222,24 +157,18 @@ module.exports = (config) => {
                     if (listStatus && update?.status <= listStatus) {
                         logger.debug({ update, storedStatus: listStatus }, 'status stored newer then update');
                         delete update.status;
-                        logger.debug({ update }, 'new update object');
                     }
                 }
-
                 const result = list.updateAssign(key.id, update);
-                if (!result) {
-                    logger.debug({ update }, 'got update for non-existent message');
-                }
+                if (!result) logger.debug({ update }, 'got update for non-existent message');
             }
         });
 
         ev.on('messages.delete', item => {
             if ('all' in item) {
-                const list = messages[item.jid];
-                list?.clear();
+                messages[item.jid]?.clear();
             } else {
-                const jid = item.keys[0].remoteJid;
-                const list = messages[jid];
+                const list = messages[item.keys[0].remoteJid];
                 if (list) {
                     const idSet = new Set(item.keys.map(k => k.id));
                     list.filter(m => !idSet.has(m.key.id));
@@ -250,85 +179,66 @@ module.exports = (config) => {
         ev.on('groups.update', updates => {
             for (const update of updates) {
                 const id = update.id;
-                if (groupMetadata[id]) {
-                    Object.assign(groupMetadata[id], update);
-                } else {
-                    logger.debug({ update }, 'got update for non-existant group metadata');
-                }
+                if (groupMetadata[id]) Object.assign(groupMetadata[id], update);
+                else logger.debug({ update }, 'got update for non-existant group metadata');
             }
         });
 
         ev.on('group-participants.update', ({ id, participants, action }) => {
             const metadata = groupMetadata[id];
-            if (metadata) {
-                const participantObjects = participants.map(participantId => {
-                    return {
-                        id: participantId,
-                    };
-                });
-
-                switch (action) {
-                    case 'add':
-                        const newParticipants = participantObjects.map(participant => ({
-                            ...participant,
-                            isAdmin: false,
-                            isSuperAdmin: false
-                        }));
-                        metadata.participants.push(...newParticipants);
-                        break;
-                    case 'demote':
-                    case 'promote':
-                        for (const participant of metadata.participants) {
-                            const isInUpdate = participantObjects.some(p => 
-                                p.id === participant.id
-                            );
-                            if (isInUpdate) {
-                                participant.isAdmin = action === 'promote';
-                            }
-                        }
-                        break;
-                    case 'remove':
-                        metadata.participants = metadata.participants.filter(p => {
-                            const shouldRemove = participantObjects.some(updateParticipant => 
-                                updateParticipant.id === p.id
-                            );
-                            return !shouldRemove;
-                        });
-                        break;
-                }
+            if (!metadata) return;
+            const parts = participants.map(pid => ({ id: pid }));
+            switch (action) {
+                case 'add':
+                    metadata.participants.push(...parts.map(p => ({ ...p, isAdmin: false, isSuperAdmin: false })));
+                    break;
+                case 'demote':
+                case 'promote':
+                    for (const p of metadata.participants) {
+                        if (parts.some(u => u.id === p.id)) p.isAdmin = action === 'promote';
+                    }
+                    break;
+                case 'remove':
+                    metadata.participants = metadata.participants.filter(p => !parts.some(u => u.id === p.id));
+                    break;
             }
         });
 
         ev.on('message-receipt.update', updates => {
             for (const { key, receipt } of updates) {
-                const obj = messages[key.remoteJid];
-                const msg = obj?.get(key.id);
-                if (msg) {
-                    updateMessageWithReceipt(msg, receipt);
-                }
+                const msg = messages[key.remoteJid]?.get(key.id);
+                if (msg) updateMessageWithReceipt(msg, receipt);
             }
         });
 
-        ev.on('messages.reaction', (reactions) => {
+        ev.on('messages.reaction', reactions => {
             for (const { key, reaction } of reactions) {
-                const obj = messages[key.remoteJid];
-                const msg = obj?.get(key.id);
-                if (msg) {
-                    updateMessageWithReaction(msg, reaction);
-                }
+                const msg = messages[key.remoteJid]?.get(key.id);
+                if (msg) updateMessageWithReaction(msg, reaction);
             }
         });
     };
 
-    const toJSON = () => ({
-        chats,
-        contacts,
-        messages,
-        labels,
-        labelAssociations
-    });
+    const toJSON = () => ({ chats, contacts, messages, labels, labelAssociations });
 
     const fromJSON = (json) => {
+        let proto;
+        try {
+            proto = require('baileys').proto;
+        } catch {
+            try {
+                proto = require('@whiskeysockets/baileys').proto;
+            } catch {
+                throw new Error(
+                    'store.fromJSON() requires a baileys install to rehydrate ' +
+                    'messages via proto.WebMessageInfo.fromObject. Tried:\n' +
+                    '  - baileys\n' +
+                    '  - @whiskeysockets/baileys\n' +
+                    'Install one of them, or avoid readFromFile / fromJSON.'
+                );
+            }
+        }
+    
         chats.upsert(...json.chats);
         labelAssociations.upsert(...(json.labelAssociations || []));
         contactsUpsert(Object.values(json.contacts));
@@ -341,103 +251,58 @@ module.exports = (config) => {
         }
     };
 
-    const getMessageLabels = (messageId) => {
-        const associations = labelAssociations
-            .filter((la) => {
-                return 'messageId' in la && la.messageId === messageId;
-            })
-            .all();
-
-        return associations.map(({ labelId }) => labelId);
-    };
+    const getMessageLabels = (messageId) =>
+        labelAssociations
+            .filter(la => 'messageId' in la && la.messageId === messageId)
+            .all()
+            .map(({ labelId }) => labelId);
 
     return {
-        chats,
-        contacts,
-        messages,
-        groupMetadata,
-        state,
-        presences,
-        labels,
-        labelAssociations,
+        chats, contacts, messages, groupMetadata, state, presences, labels, labelAssociations,
         bind,
         loadMessages: async (jid, count, cursor) => {
             const list = assertMessageList(jid);
             const mode = !cursor || 'before' in cursor ? 'before' : 'after';
-            const cursorKey = !!cursor ? ('before' in cursor ? cursor.before : cursor.after) : undefined;
+            const cursorKey = cursor ? ('before' in cursor ? cursor.before : cursor.after) : undefined;
             const cursorValue = cursorKey ? list.get(cursorKey.id) : undefined;
-
-            let messages;
-            if (list && mode === 'before' && (!cursorKey || cursorValue)) {
-                if (cursorValue) {
-                    const msgIdx = list.array.findIndex(m => m.key.id === cursorKey?.id);
-                    messages = list.array.slice(0, msgIdx);
-                } else {
-                    messages = list.array;
-                }
-
-                const diff = count - messages.length;
-                if (diff < 0) {
-                    messages = messages.slice(-count);
-                }
-            } else {
-                messages = [];
+            let out = [];
+            if (mode === 'before' && (!cursorKey || cursorValue)) {
+                out = cursorValue
+                    ? list.array.slice(0, list.array.findIndex(m => m.key.id === cursorKey?.id))
+                    : list.array;
+                if (count - out.length < 0) out = out.slice(-count);
             }
-
-            return messages;
+            return out;
         },
-        getLabels: () => {
-            return labels;
-        },
-        getChatLabels: (chatId) => {
-            return labelAssociations.filter((la) => la.chatId === chatId).all();
-        },
+        getLabels: () => labels,
+        getChatLabels: (chatId) => labelAssociations.filter(la => la.chatId === chatId).all(),
         getMessageLabels,
         loadMessage: async (jid, id) => messages[jid]?.get(id),
-        mostRecentMessage: async (jid) => {
-            const message = messages[jid]?.array.slice(-1)[0];
-            return message;
-        },
+        mostRecentMessage: async (jid) => messages[jid]?.array.slice(-1)[0],
         fetchImageUrl: async (jid, sock) => {
             const contact = contacts[jid];
-            if (!contact) {
-                return sock?.profilePictureUrl(jid);
-            }
-
+            if (!contact) return sock?.profilePictureUrl(jid);
             if (typeof contact.imgUrl === 'undefined') {
                 contact.imgUrl = await sock?.profilePictureUrl(jid);
             }
-
             return contact.imgUrl;
         },
         fetchGroupMetadata: async (jid, sock) => {
             if (!groupMetadata[jid]) {
                 const metadata = await sock?.groupMetadata(jid);
-                if (metadata) {
-                    groupMetadata[jid] = metadata;
-                }
+                if (metadata) groupMetadata[jid] = metadata;
             }
-
             return groupMetadata[jid];
         },
-        fetchMessageReceipts: async ({ remoteJid, id }) => {
-            const list = messages[remoteJid];
-            const msg = list?.get(id);
-            return msg?.userReceipt;
-        },
+        fetchMessageReceipts: async ({ remoteJid, id }) => messages[remoteJid]?.get(id)?.userReceipt,
         toJSON,
         fromJSON,
-        writeToFile: (path) => {
-            const { writeFileSync } = require('fs');
-            writeFileSync(path, JSON.stringify(toJSON()));
-        },
+        writeToFile: (path) => require('fs').writeFileSync(path, JSON.stringify(toJSON())),
         readFromFile: (path) => {
             const { readFileSync, existsSync } = require('fs');
             if (existsSync(path)) {
                 logger.debug({ path }, 'reading from file');
-                const jsonStr = readFileSync(path, { encoding: 'utf-8' });
-                const json = JSON.parse(jsonStr);
-                fromJSON(json);
+                fromJSON(JSON.parse(readFileSync(path, 'utf-8')));
             }
         }
     };
