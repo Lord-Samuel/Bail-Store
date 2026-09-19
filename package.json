@@ -17,9 +17,6 @@
   "scripts": {
     "start": "node ."
   },
-  "dependencies": {
-    "@adiwajshing/keyed-db": "0.2.4"
-  },
   "peerDependencies": {
     "baileys": "github:Lord-Samuel/Bail-lite"
   },
